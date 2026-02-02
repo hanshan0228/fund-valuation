@@ -7,6 +7,10 @@
           <div>
             <el-tag v-if="store.isTradingTime()" type="success">交易时间</el-tag>
             <el-tag v-else type="info">非交易时间</el-tag>
+            <el-button type="success" @click="showAddDialog = true">
+              <el-icon><Plus /></el-icon>
+              添加持仓
+            </el-button>
             <el-button type="primary" @click="refresh" :loading="store.loading">
               <el-icon><Refresh /></el-icon>
               刷新
@@ -93,6 +97,55 @@
     </el-card>
 
     <el-empty v-else-if="!store.loading" description="暂无数据" />
+
+    <!-- 添加持仓对话框 -->
+    <el-dialog v-model="showAddDialog" title="添加持仓" width="500px">
+      <el-form :model="holdingForm" label-width="100px">
+        <el-form-item label="基金代码" required>
+          <el-input
+            v-model="holdingForm.fund_code"
+            placeholder="6位数字，如：001632"
+            maxlength="6"
+          />
+        </el-form-item>
+        <el-form-item label="基金名称">
+          <el-input
+            v-model="holdingForm.fund_name"
+            placeholder="可选，系统会自动获取"
+          />
+        </el-form-item>
+        <el-form-item label="持仓金额" required>
+          <el-input-number
+            v-model="holdingForm.amount"
+            :precision="2"
+            :min="0.01"
+            :controls="false"
+            style="width: 100%"
+            placeholder="持仓金额"
+          />
+        </el-form-item>
+        <el-form-item label="持仓份额" required>
+          <el-input-number
+            v-model="holdingForm.shares"
+            :precision="2"
+            :min="0.01"
+            :controls="false"
+            style="width: 100%"
+            placeholder="持仓份额"
+          />
+        </el-form-item>
+        <el-alert
+          title="提示：成本净值 = 持仓金额 ÷ 持仓份额"
+          type="info"
+          :closable="false"
+          style="margin-top: 10px"
+        />
+      </el-form>
+      <template #footer>
+        <el-button @click="showAddDialog = false">取消</el-button>
+        <el-button type="primary" @click="addHolding" :loading="adding">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -100,6 +153,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { usePortfolioStore } from '../stores/portfolio'
+import { holdingAPI } from '../api'
 import { ElMessage } from 'element-plus'
 import { computed } from 'vue'
 
@@ -108,6 +162,16 @@ const store = usePortfolioStore()
 
 const portfolioId = computed(() => parseInt(route.params.id))
 const stats = computed(() => store.currentStats)
+
+// 添加持仓对话框
+const showAddDialog = ref(false)
+const adding = ref(false)
+const holdingForm = ref({
+  fund_code: '',
+  fund_name: '',
+  amount: null,
+  shares: null
+})
 
 const formatNumber = (num) => {
   if (!num) return '0.00'
@@ -138,6 +202,44 @@ const refresh = async () => {
     ElMessage.success('刷新成功')
   } catch (error) {
     ElMessage.error(error.message)
+  }
+}
+
+const addHolding = async () => {
+  // 验证
+  if (!holdingForm.value.fund_code || !/^\d{6}$/.test(holdingForm.value.fund_code)) {
+    ElMessage.warning('请输入正确的6位基金代码')
+    return
+  }
+  if (!holdingForm.value.amount || holdingForm.value.amount <= 0) {
+    ElMessage.warning('请输入正确的持仓金额')
+    return
+  }
+  if (!holdingForm.value.shares || holdingForm.value.shares <= 0) {
+    ElMessage.warning('请输入正确的持仓份额')
+    return
+  }
+
+  try {
+    adding.value = true
+    await holdingAPI.create(portfolioId.value, holdingForm.value)
+    ElMessage.success('添加成功')
+    showAddDialog.value = false
+
+    // 重置表单
+    holdingForm.value = {
+      fund_code: '',
+      fund_name: '',
+      amount: null,
+      shares: null
+    }
+
+    // 刷新数据
+    await store.refresh(portfolioId.value)
+  } catch (error) {
+    ElMessage.error(error.message)
+  } finally {
+    adding.value = false
   }
 }
 

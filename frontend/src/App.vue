@@ -48,17 +48,24 @@
 :deep(.el-menu--horizontal) {
   border-bottom: none;
   flex: 1;
+  background-color: #409eff !important;
 }
 
 :deep(.el-menu--horizontal .el-menu-item) {
-  color: white;
+  color: white !important;
   border-bottom-color: transparent;
+  background-color: transparent !important;
 }
 
-:deep(.el-menu--horizontal .el-menu-item:hover),
+:deep(.el-menu--horizontal .el-menu-item:hover) {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  color: white !important;
+}
+
 :deep(.el-menu--horizontal .el-menu-item.is-active) {
-  background-color: rgba(255, 255, 255, 0.2);
-  border-bottom-color: white;
+  background-color: rgba(255, 255, 255, 0.3) !important;
+  border-bottom: 2px solid white !important;
+  color: white !important;
 }
 </style>
 
