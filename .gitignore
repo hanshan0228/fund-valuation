@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+.DS_Store
+*.local
+
+# Database
+data/database.db
+data/uploads/*
+data/logs/*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Env
+.env.local
+.env.*.local
+
+# PaddleOCR
+inference/
+.paddleocr/
+
+# Logs
+*.log
