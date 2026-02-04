@@ -18,36 +18,59 @@ class OCRService:
             import os
             os.environ['PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK'] = 'True'
             from paddleocr import PaddleOCR
-            # 使用移动端轻量模型，大幅提升速度
-            self._ocr = PaddleOCR(
-                use_textline_orientation=False,
-                lang='ch',
-                det_model_dir=None,  # 使用默认轻量模型
-                rec_model_dir=None,
-                ocr_version='PP-OCRv4',  # 使用v4轻量版本
-            )
+            # 优化配置以提高检测率
+            # 注意：PaddleX版本的参数与PaddleOCR不同
+            try:
+                # 尝试使用优化参数（PaddleOCR）
+                self._ocr = PaddleOCR(
+                    use_angle_cls=True,
+                    lang='ch',
+                    det_limit_side_len=1920,
+                    det_db_box_thresh=0.3,
+                    det_db_unclip_ratio=1.6
+                )
+            except:
+                # 降级到基本参数（PaddleX）
+                self._ocr = PaddleOCR(
+                    use_angle_cls=True,
+                    lang='ch'
+                )
         return self._ocr
 
-    def _split_long_image(self, image: np.ndarray, max_height: int = 4000) -> List[np.ndarray]:
-        """将长图分割成多个小图"""
+    def _split_long_image(self, image: np.ndarray, window_height: int = 1000) -> List[np.ndarray]:
+        """使用滑动窗口将长图分割成多个小图
+
+        Args:
+            image: 输入图像
+            window_height: 滑动窗口高度，较小的窗口可以提高OCR检测率
+
+        Returns:
+            分割后的图像片段列表
+        """
         height, width = image.shape[:2]
 
-        if height <= max_height:
+        # 对于较短的图片，直接返回
+        if height <= window_height:
             return [image]
 
-        # 分割图片，每段有一定重叠以避免切断文字
-        overlap = 300
+        # 使用滑动窗口，重叠50%以确保不会遗漏边界内容
+        overlap = window_height // 2
         segments = []
         y = 0
 
         while y < height:
-            end_y = min(y + max_height, height)
+            end_y = min(y + window_height, height)
             segment = image[y:end_y, :]
             segments.append(segment)
-            y = end_y - overlap
-            if end_y == height:
+
+            # 如果已经到达末尾，退出
+            if end_y >= height:
                 break
 
+            # 移动到下一个窗口（重叠50%）
+            y += overlap
+
+        print(f"长图分割: 图片高度 {height}px，分割成 {len(segments)} 个片段")
         return segments
 
     def _preprocess_image(self, image: np.ndarray) -> List[np.ndarray]:
@@ -97,6 +120,7 @@ class OCRService:
                            '金选指数', '金选债券', '金选混合', '金选纯债']
 
         # 第一遍：尝试找基金代码
+        code_based_results = []
         i = 0
         while i < len(text_lines):
             line = text_lines[i]
@@ -107,7 +131,7 @@ class OCRService:
                 amounts = self._find_amounts_in_lines(search_lines)
 
                 if amounts:
-                    results.append({
+                    code_based_results.append({
                         "fund_code": fund_code,
                         "amount": float(max(amounts)),
                         "shares": 0.0,
@@ -117,38 +141,42 @@ class OCRService:
             else:
                 i += 1
 
-        # 如果没找到基金代码，第二遍：通过基金名称+金额识别
-        if not results:
-            i = 0
-            while i < len(text_lines):
-                line = text_lines[i].strip()
+        # 第二遍：通过基金名称+金额识别（总是执行，补充没有代码的基金）
+        name_based_results = []
+        i = 0
+        while i < len(text_lines):
+            line = text_lines[i].strip()
 
-                # 排除明显不是基金的内容
-                if any(ex in line for ex in exclude_keywords):
-                    i += 1
-                    continue
-
-                # 检查是否是基金名称
-                is_fund_name = self._is_fund_name(line, fund_type_keywords,
-                                                   fund_suffixes, fund_company_prefixes)
-
-                if is_fund_name:
-                    fund_name = line
-                    # 在后续行查找金额
-                    search_lines = text_lines[i+1:min(i+4, len(text_lines))]
-                    amounts = self._find_amounts_in_lines(search_lines)
-
-                    if amounts:
-                        amount = max(amounts)
-                        results.append({
-                            "fund_code": "",
-                            "amount": float(amount),
-                            "shares": 0.0,
-                            "fund_name": fund_name
-                        })
-                        i += 2
-                        continue
+            # 排除明显不是基金的内容
+            if any(ex in line for ex in exclude_keywords):
                 i += 1
+                continue
+
+            # 检查是否是基金名称
+            is_fund_name = self._is_fund_name(line, fund_type_keywords,
+                                               fund_suffixes, fund_company_prefixes)
+
+            if is_fund_name:
+                fund_name = line
+                # 在后续行查找金额
+                search_lines = text_lines[i+1:min(i+4, len(text_lines))]
+                amounts = self._find_amounts_in_lines(search_lines)
+
+                if amounts:
+                    amount = max(amounts)
+                    name_based_results.append({
+                        "fund_code": "",
+                        "amount": float(amount),
+                        "shares": 0.0,
+                        "fund_name": fund_name
+                    })
+                    i += 2
+                    continue
+            i += 1
+
+        # 合并两种方式的结果（代码优先，但也保留名称匹配的结果）
+        results = code_based_results + name_based_results
+        print(f"  通过代码识别: {len(code_based_results)} 只，通过名称识别: {len(name_based_results)} 只")
 
         return results
 
@@ -293,34 +321,66 @@ class OCRService:
         """
         ocr = self._get_ocr()
 
-        # 对长图进行分段处理
-        image_segments = self._split_long_image(image)
+        # 对长图进行分段处理（使用更小的窗口提高检测率）
+        # 使用800px窗口，确保每个基金条目都被完整扫描
+        image_segments = self._split_long_image(image, window_height=800)
 
         all_text_lines = []
 
         # 对每个分段进行OCR
-        for segment in image_segments:
+        for idx, segment in enumerate(image_segments):
             try:
-                result = ocr.ocr(segment)
+                print(f"正在识别第 {idx+1}/{len(image_segments)} 个片段...")
+                # 兼容PaddleX和PaddleOCR的API
+                try:
+                    # PaddleOCR API
+                    result = ocr.ocr(segment, cls=True)
+                except TypeError:
+                    # PaddleX API (predict方法)
+                    result = ocr.predict(segment)
+
                 text_lines = self._extract_text_from_result(result)
+                print(f"  片段 {idx+1} 识别到 {len(text_lines)} 行文本")
                 all_text_lines.extend(text_lines)
             except Exception as e:
-                print(f"OCR识别失败: {e}")
+                print(f"OCR识别失败 (片段 {idx+1}): {e}")
+                import traceback
+                traceback.print_exc()
                 continue
+
+        print(f"共提取到 {len(all_text_lines)} 行文本")
+
+        # 调试：输出所有文本（可选，用于调试）
+        if len(all_text_lines) > 0:
+            print("\n所有识别文本（前100行）:")
+            for idx, line in enumerate(all_text_lines[:100], 1):
+                if line.strip():  # 只打印非空行
+                    print(f"  {idx}. {line}")
 
         # 从所有文本中提取基金信息
         all_results = self._extract_fund_info(all_text_lines)
+        print(f"初步提取到 {len(all_results)} 条基金信息")
+
+        # 打印初步识别结果用于调试
+        for idx, item in enumerate(all_results, 1):
+            print(f"  [{idx}] {item.get('fund_name', '未识别')} - 金额: {item.get('amount', 0):.2f}")
 
         # 去重（基于fund_code或fund_name）
+        # 由于使用滑动窗口，可能会有重复，需要智能去重
         unique_results = {}
         for item in all_results:
             if self._validate_fund_data(item):
+                # 优先使用基金代码作为key，其次使用名称
                 key = item["fund_code"] if item["fund_code"] else item["fund_name"]
-                if key and key not in unique_results:
-                    unique_results[key] = item
+                if key:
+                    # 如果已存在，保留金额较大的（可能更准确）
+                    if key not in unique_results or item["amount"] > unique_results[key]["amount"]:
+                        unique_results[key] = item
+            else:
+                print(f"  验证失败: {item.get('fund_name', '未识别')} - 金额: {item.get('amount', 0)}")
 
         results = list(unique_results.values())
-        print(f"OCR识别到 {len(results)} 只基金")
+        print(f"去重后识别到 {len(results)} 只基金")
 
         # 通过API搜索补充完整信息
         if enrich_info and results:
