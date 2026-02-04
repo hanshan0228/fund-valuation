@@ -52,10 +52,11 @@ export const ocrAPI = {
     const formData = new FormData()
     formData.append('file', file)
     return api.post('/ocr/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000  // OCR识别需要更长时间，设置5分钟超时
     })
   },
-  uploadBase64: (image) => api.post('/ocr/upload-base64', { image })
+  uploadBase64: (image) => api.post('/ocr/upload-base64', { image }, { timeout: 300000 })
 }
 
 export default api

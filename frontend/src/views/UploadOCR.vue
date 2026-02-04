@@ -1,5 +1,5 @@
 <template>
-  <div class="upload-ocr">
+  <div class="upload-ocr" v-loading="recognizing" element-loading-text="正在识别中，请稍候..." element-loading-background="rgba(255, 255, 255, 0.8)">
     <el-card>
       <template #header>
         <span>OCR识别 - 上传支付宝基金截图</span>
@@ -30,13 +30,14 @@
         <el-divider>识别结果</el-divider>
 
         <el-alert type="info" :closable="false" style="margin-bottom: 15px;">
-          请仔细核对识别结果，确认无误后选择组合导入
+          共识别到 <strong>{{ ocrResults.length }}</strong> 只基金，请仔细核对后选择组合导入
         </el-alert>
 
         <el-table :data="ocrResults" border>
+          <el-table-column type="index" label="序号" width="60" align="center" />
           <el-table-column prop="fund_code" label="基金代码" width="100">
-            <template #default="{ row, $index }">
-              <el-input v-model="row.fund_code" size="small" />
+            <template #default="{ row }">
+              <el-input v-model="row.fund_code" size="small" :class="{ 'is-empty': !row.fund_code }" />
             </template>
           </el-table-column>
           <el-table-column prop="fund_name" label="基金名称" width="200">
@@ -105,10 +106,11 @@ const ocrResults = ref([])
 const portfolios = ref([])
 const selectedPortfolio = ref(null)
 const importing = ref(false)
+const recognizing = ref(false)
 
 const handleFileChange = async (file) => {
   try {
-    ElMessage.info('正在识别中...')
+    recognizing.value = true
     const result = await ocrAPI.uploadFile(file.raw)
 
     if (result.success && result.data.length > 0) {
@@ -119,6 +121,8 @@ const handleFileChange = async (file) => {
     }
   } catch (error) {
     ElMessage.error('OCR识别失败: ' + error.message)
+  } finally {
+    recognizing.value = false
   }
 }
 
@@ -195,5 +199,10 @@ onMounted(async () => {
   display: flex;
   gap: 15px;
   align-items: center;
+}
+
+:deep(.is-empty .el-input__wrapper) {
+  background-color: #fef0f0;
+  border-color: #f56c6c;
 }
 </style>
